@@ -25,12 +25,16 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import com.gemchat.app.ui.theme.SurfaceContainerLowest
 import com.gemchat.app.ui.theme.OnSurface
+import com.gemchat.app.ui.settings.SettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = getSharedPreferences("gemchat", android.content.Context.MODE_PRIVATE)
+        val isDark = prefs.getBoolean("dark_mode", true)
+        android.util.Log.d("GemChat", "isDark = $isDark")
         setContent {
-            GemChatTheme {
+            GemChatTheme(darkTheme = isDark) {
                 GemChatApp()
             }
         }
@@ -48,22 +52,16 @@ fun GemChatApp() {
         }
     }
 
-    val showDrawer = true
-
-    if (showDrawer) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            drawerContent = {
-                AppDrawer(
-                    navController = navController,
-                    currentRoute = currentRoute,
-                    onClose = { scope.launch { drawerState.close() } }
-                )
-            }
-        ) {
-            MainNavHost(navController, scope, drawerState)
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            AppDrawer(
+                navController = navController,
+                currentRoute = currentRoute,
+                onClose = { scope.launch { drawerState.close() } }
+            )
         }
-    } else {
+    ) {
         MainNavHost(navController, scope, drawerState)
     }
 }
@@ -79,12 +77,8 @@ fun MainNavHost(
         startDestination = "splash",
         modifier = Modifier.fillMaxSize()
     ) {
-        composable("splash") {
-            SplashScreen(navController)
-        }
-        composable("login") {
-            LoginScreen(navController)
-        }
+        composable("splash") { SplashScreen(navController) }
+        composable("login") { LoginScreen(navController) }
         composable("conversations") {
             ConversationsScreen(
                 navController = navController,
@@ -98,17 +92,7 @@ fun MainNavHost(
                 onOpenDrawer = { scope.launch { drawerState.open() } }
             )
         }
-        composable("about") {
-            AboutScreen(navController)
-        }
-        composable("settings") {
-            // tymczasowy pusty ekran
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.fillMaxSize().background(SurfaceContainerLowest),
-                contentAlignment = androidx.compose.ui.Alignment.Center
-            ) {
-                androidx.compose.material3.Text("Settings — coming soon", color = OnSurface)
-            }
-        }
+        composable("about") { AboutScreen(navController) }
+        composable("settings") { SettingsScreen(navController) }
     }
 }

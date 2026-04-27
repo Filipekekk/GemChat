@@ -1,5 +1,5 @@
 package com.gemchat.app.ui.chat
-
+import com.gemchat.app.data.repository.GeminiRepository
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -36,12 +36,14 @@ import com.gemchat.app.ui.theme.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.flow.first
 // ViewModel
 class ChatViewModel(
     private val repository: ChatRepository,
     private val conversationId: Long
 ) : ViewModel() {
+
+    private val geminiRepository = GeminiRepository()
 
     val messages = if (conversationId > 0)
         repository.getMessagesForConversation(conversationId)
@@ -54,14 +56,20 @@ class ChatViewModel(
     fun sendMessage(text: String, imagePath: String? = null) {
         if (conversationId <= 0) return
         viewModelScope.launch {
-            _isLoading.value = true
-            // Zapisz wiadomość użytkownika
+            // Jeśli to pierwsza wiadomość — zaktualizuj tytuł
+            val currentMessages = repository.getMessagesForConversation(conversationId).first()
+            if (currentMessages.isEmpty()) {
+                val title = if (text.length > 30) text.take(30) + "..." else text
+                repository.updateConversationTitle(conversationId, title)
+            }
+
             repository.insertMessage(conversationId, text, true, imagePath)
-            // Zaktualizuj ostatnią wiadomość w konwersacji
             repository.updateLastMessage(conversationId, text)
-            // Tu dodasz wywołanie Gemini API
-            // val response = geminiRepo.sendMessage(text)
-            // repository.insertMessage(conversationId, response, false)
+
+            _isLoading.value = true
+            val response = geminiRepository.sendMessage(text)
+            repository.insertMessage(conversationId, response, false)
+            repository.updateLastMessage(conversationId, response)
             _isLoading.value = false
         }
     }

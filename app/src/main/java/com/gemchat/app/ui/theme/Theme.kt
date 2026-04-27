@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.lightColorScheme
 
 private val GemChatColorScheme = darkColorScheme(
     primary          = Primary,
@@ -25,9 +26,9 @@ private val GemChatColorScheme = darkColorScheme(
 )
 
 @Composable
-fun GemChatTheme(content: @Composable () -> Unit) {
+fun GemChatTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = GemChatColorScheme,
+        colorScheme = if (darkTheme) GemChatColorScheme else lightColorScheme(),
         content = content
     )
 }
