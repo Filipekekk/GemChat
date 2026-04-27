@@ -18,29 +18,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.gemchat.app.GemChatApplication
+import com.gemchat.app.data.model.Conversation
 import com.gemchat.app.ui.theme.*
-
-data class ConversationItem(
-    val id: Long,
-    val title: String,
-    val lastMessage: String,
-    val timestamp: String,
-    val hasUnread: Boolean = false
-)
-
-// Przykładowe dane — zastąp danymi z Room DB
-val sampleConversations = listOf(
-    ConversationItem(1, "Architectural Analysis", "I've analyzed the blueprints and identified three...", "Just now", true),
-    ConversationItem(2, "Strategic Planning 2024", "The market projection for decentralized platforms...", "2h ago"),
-    ConversationItem(3, "Creative Writing Prompt", "Once upon a time in a digital realm far, far away...", "Yesterday"),
-    ConversationItem(4, "Code Review Session", "The function could be optimized using a hashmap...", "Mon"),
-    ConversationItem(5, "Travel Itinerary", "For your trip to Tokyo, I recommend starting with...", "Sun"),
-)
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,11 +38,14 @@ fun ConversationsScreen(
     navController: NavController,
     onOpenDrawer: () -> Unit
 ) {
+    val context = LocalContext.current
+    val repository = (context.applicationContext as GemChatApplication).repository
+    val conversations by repository.getAllConversations().collectAsState(initial = emptyList())
     var searchQuery by remember { mutableStateOf("") }
-
-    val filtered = sampleConversations.filter {
+    val scope = rememberCoroutineScope()
+    val filtered = conversations.filter {
         it.title.contains(searchQuery, ignoreCase = true) ||
-        it.lastMessage.contains(searchQuery, ignoreCase = true)
+                it.lastMessage.contains(searchQuery, ignoreCase = true)
     }
 
     Scaffold(
@@ -80,9 +73,12 @@ fun ConversationsScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    navController.navigate("chat/new")
+                    scope.launch {
+                        val newId = repository.insertConversation("New conversation")
+                        navController.navigate("chat/$newId")
+                    }
                 },
-                containerColor = PrimaryContainer,
+            containerColor = PrimaryContainer,
                 shape = CircleShape,
                 modifier = Modifier.size(60.dp)
             ) {
@@ -112,7 +108,13 @@ fun ConversationsScreen(
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search conversations...", color = OnSurfaceVariant.copy(alpha = 0.5f), fontSize = 14.sp) },
+                    placeholder = {
+                        Text(
+                            "Search conversations...",
+                            color = OnSurfaceVariant.copy(alpha = 0.5f),
+                            fontSize = 14.sp
+                        )
+                    },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
@@ -128,12 +130,34 @@ fun ConversationsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(filtered) { conv ->
-                    ConversationCard(
-                        conversation = conv,
-                        onClick = { navController.navigate("chat/${conv.id}") }
-                    )
+            if (filtered.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("💎", fontSize = 48.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "No conversations yet",
+                            color = OnSurfaceVariant,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            "Tap + to start a new chat",
+                            color = OnSurfaceVariant.copy(alpha = 0.6f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(filtered) { conv ->
+                        ConversationCard(
+                            conversation = conv,
+                            onClick = { navController.navigate("chat/${conv.id}") }
+                        )
+                    }
                 }
             }
         }
@@ -141,7 +165,10 @@ fun ConversationsScreen(
 }
 
 @Composable
-fun ConversationCard(conversation: ConversationItem, onClick: () -> Unit) {
+fun ConversationCard(conversation: Conversation, onClick: () -> Unit) {
+    val dateFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val time = dateFormat.format(Date(conversation.timestamp))
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -151,15 +178,12 @@ fun ConversationCard(conversation: ConversationItem, onClick: () -> Unit) {
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar z gradientem
         Box(
             modifier = Modifier
                 .size(56.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(PrimaryContainer, SecondaryContainer)
-                    )
+                    Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -184,34 +208,21 @@ fun ConversationCard(conversation: ConversationItem, onClick: () -> Unit) {
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = conversation.timestamp,
+                    text = time,
                     fontSize = 10.sp,
-                    color = if (conversation.hasUnread) PrimaryContainer else OnSurfaceVariant,
-                    fontWeight = if (conversation.hasUnread) FontWeight.Bold else FontWeight.Normal
+                    color = OnSurfaceVariant
                 )
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = conversation.lastMessage,
-                    fontSize = 13.sp,
-                    color = OnSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (conversation.hasUnread) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(PrimaryContainer)
-                    )
-                }
-            }
+            Text(
+                text = conversation.lastMessage.ifEmpty { "New conversation" },
+                fontSize = 13.sp,
+                color = OnSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

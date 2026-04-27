@@ -1,6 +1,5 @@
 package com.gemchat.app.ui.chat
 
-import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -12,8 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,27 +20,62 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
+import com.gemchat.app.GemChatApplication
+import com.gemchat.app.data.model.Message
+import com.gemchat.app.data.repository.ChatRepository
 import com.gemchat.app.ui.theme.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class Message(
-    val id: Long,
-    val text: String,
-    val isFromUser: Boolean,
-    val timestamp: String,
-    val imageUri: String? = null
-)
+// ViewModel
+class ChatViewModel(
+    private val repository: ChatRepository,
+    private val conversationId: Long
+) : ViewModel() {
 
-val sampleMessages = listOf(
-    Message(1, "Analyze the architectural structure of a modern vault", true, "14:30"),
-    Message(2, "I've analyzed the blueprints for the neo-modernist vault and identified three key structural elements: reinforced composite walls using a carbon-fiber matrix, a biometric access grid embedded within the entrance facade, and an electromagnetic pulse shield integrated into the ceiling panels.", false, "14:30"),
-    Message(3, "What about the security systems?", true, "14:31"),
-    Message(4, "The security system operates on three independent layers. The outer perimeter uses quantum-encrypted motion sensors, the middle layer deploys a neural-network camera array for facial recognition, and the inner sanctum relies on DNA-signature verification combined with real-time behavioral analysis.", false, "14:31"),
-)
+    val messages = if (conversationId > 0)
+        repository.getMessagesForConversation(conversationId)
+    else
+        MutableStateFlow(emptyList<Message>()).asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading = _isLoading.asStateFlow()
+
+    fun sendMessage(text: String, imagePath: String? = null) {
+        if (conversationId <= 0) return
+        viewModelScope.launch {
+            _isLoading.value = true
+            // Zapisz wiadomość użytkownika
+            repository.insertMessage(conversationId, text, true, imagePath)
+            // Zaktualizuj ostatnią wiadomość w konwersacji
+            repository.updateLastMessage(conversationId, text)
+            // Tu dodasz wywołanie Gemini API
+            // val response = geminiRepo.sendMessage(text)
+            // repository.insertMessage(conversationId, response, false)
+            _isLoading.value = false
+        }
+    }
+}
+
+class ChatViewModelFactory(
+    private val repository: ChatRepository,
+    private val conversationId: Long
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        @Suppress("UNCHECKED_CAST")
+        return ChatViewModel(repository, conversationId) as T
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,11 +84,25 @@ fun ChatScreen(
     conversationId: String?,
     onOpenDrawer: () -> Unit
 ) {
+    val context = LocalContext.current
+    val repository = (context.applicationContext as GemChatApplication).repository
+    val convId = conversationId?.toLongOrNull() ?: 0L
+
+    val viewModel: ChatViewModel = viewModel(
+        factory = ChatViewModelFactory(repository, convId)
+    )
+
+    val messages by viewModel.messages.collectAsState(initial = emptyList())
+    val isLoading by viewModel.isLoading.collectAsState()
     var messageText by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf(*sampleMessages.toTypedArray()) }
-    var isTyping by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
 
     Scaffold(
         containerColor = SurfaceContainerLowest,
@@ -63,7 +111,7 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(
-                            "Architectural Analysis",
+                            "GemChat",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = OnSurface
@@ -100,25 +148,11 @@ fun ChatScreen(
                 onValueChange = { messageText = it },
                 onSend = {
                     if (messageText.isNotBlank()) {
-                        val userMsg = Message(
-                            id = messages.size.toLong() + 1,
-                            text = messageText,
-                            isFromUser = true,
-                            timestamp = "teraz"
-                        )
-                        messages.add(userMsg)
+                        viewModel.sendMessage(messageText)
                         messageText = ""
-                        isTyping = true
-                        scope.launch {
-                            listState.animateScrollToItem(messages.size - 1)
-                            // Tutaj wywołasz GeminiRepository.sendMessage()
-                            // Po otrzymaniu odpowiedzi: isTyping = false, messages.add(aiMsg)
-                        }
                     }
                 },
-                onImagePick = {
-                    // Tutaj odpal imagePickerLauncher.launch("image/*")
-                }
+                onImagePick = { }
             )
         }
     ) { padding ->
@@ -134,8 +168,7 @@ fun ChatScreen(
             items(messages) { msg ->
                 ChatBubble(message = msg)
             }
-
-            if (isTyping) {
+            if (isLoading) {
                 item { TypingIndicator() }
             }
         }
@@ -149,18 +182,13 @@ fun ChatBubble(message: Message) {
         horizontalArrangement = if (message.isFromUser) Arrangement.End else Arrangement.Start
     ) {
         if (!message.isFromUser) {
-            // Avatar AI
             Box(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))
-                    ),
+                    .background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))),
                 contentAlignment = Alignment.Center
-            ) {
-                Text("💎", fontSize = 14.sp)
-            }
+            ) { Text("💎", fontSize = 14.sp) }
             Spacer(modifier = Modifier.width(8.dp))
         }
 
@@ -172,8 +200,7 @@ fun ChatBubble(message: Message) {
                 modifier = Modifier
                     .clip(
                         RoundedCornerShape(
-                            topStart = 24.dp,
-                            topEnd = 24.dp,
+                            topStart = 24.dp, topEnd = 24.dp,
                             bottomStart = if (message.isFromUser) 24.dp else 4.dp,
                             bottomEnd = if (message.isFromUser) 4.dp else 24.dp
                         )
@@ -186,18 +213,12 @@ fun ChatBubble(message: Message) {
                     )
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Text(
-                    text = message.text,
-                    color = OnSurface,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+                Text(text = message.text, color = OnSurface, fontSize = 14.sp, lineHeight = 20.sp)
             }
-
             Spacer(modifier = Modifier.height(4.dp))
-
             Text(
-                text = message.timestamp,
+                text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(message.timestamp)),
                 fontSize = 10.sp,
                 color = OnSurfaceVariant.copy(alpha = 0.6f)
             )
@@ -226,9 +247,7 @@ fun TypingIndicator() {
                 .background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))),
             contentAlignment = Alignment.Center
         ) { Text("💎", fontSize = 14.sp) }
-
         Spacer(modifier = Modifier.width(8.dp))
-
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(24.dp, 24.dp, 24.dp, 4.dp))
@@ -263,7 +282,6 @@ fun ChatInputBar(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Image picker button
         IconButton(
             onClick = onImagePick,
             modifier = Modifier
@@ -276,7 +294,6 @@ fun ChatInputBar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Text input
         TextField(
             value = value,
             onValueChange = onValueChange,
@@ -301,7 +318,6 @@ fun ChatInputBar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Send button
         IconButton(
             onClick = onSend,
             modifier = Modifier
