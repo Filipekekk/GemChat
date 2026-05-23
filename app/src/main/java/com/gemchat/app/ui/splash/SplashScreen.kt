@@ -3,8 +3,11 @@ package com.gemchat.app.ui.splash
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -13,6 +16,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -20,21 +24,17 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.gemchat.app.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 
 @Composable
 fun SplashScreen(navController: NavController) {
 
-    // Fade-in animacja logo (spełnia wymóg animacji w projekcie)
-    val alpha by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 1200, easing = EaseOut),
-        label = "logo_fade"
-    )
-    val scale by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 1200, easing = EaseOutBack),
-        label = "logo_scale"
-    )
+    val alpha = remember { Animatable(0f) }
+    val scale = remember { Animatable(0.5f) }
+    val rotation = remember { Animatable(0f) }
 
     // Pulsowanie logo po załadowaniu
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -48,6 +48,16 @@ fun SplashScreen(navController: NavController) {
         label = "glow_pulse"
     )
 
+    val floatingOffset by infiniteTransition.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "floating"
+    )
+
     // Progress bar animacja
     var progress by remember { mutableFloatStateOf(0f) }
     val animatedProgress by animateFloatAsState(
@@ -56,12 +66,26 @@ fun SplashScreen(navController: NavController) {
         label = "progress"
     )
 
+    var showStartButton by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
-        progress = 1f
-        delay(2200)
-        navController.navigate("login") {
-            popUpTo("splash") { inclusive = true }
+        val a1 = launch {
+            alpha.animateTo(1f, animationSpec = tween(1000))
         }
+        val a2 = launch {
+            scale.animateTo(1f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
+        }
+        val a3 = launch {
+            rotation.animateTo(360f, animationSpec = tween(1500, easing = EaseInOutCubic))
+        }
+        progress = 1f
+        
+        // Czekamy na zakończenie animacji i paska postępu
+        a1.join()
+        a2.join()
+        a3.join()
+        delay(800) 
+        showStartButton = true
     }
 
     Box(
@@ -91,13 +115,18 @@ fun SplashScreen(navController: NavController) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(32.dp)
-                .alpha(alpha)
-                .scale(scale)
+                .offset(y = floatingOffset.dp)
         ) {
             // Logo placeholder — zastąp Image(painterResource(R.drawable.logo)) gdy dodasz plik
             Box(
                 modifier = Modifier
                     .size(120.dp)
+                    .graphicsLayer(
+                        alpha = alpha.value,
+                        scaleX = scale.value,
+                        scaleY = scale.value,
+                        rotationY = rotation.value
+                    )
                     .background(
                         brush = Brush.linearGradient(
                             colors = listOf(PrimaryContainer, SecondaryContainer)
@@ -130,15 +159,45 @@ fun SplashScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(64.dp))
 
-            // Shimmer progress bar
-            LinearProgressIndicator(
-                progress = { animatedProgress },
-                modifier = Modifier
-                    .width(200.dp)
-                    .height(2.dp),
-                color = PrimaryContainer,
-                trackColor = SurfaceContainerHigh
-            )
+            AnimatedVisibility(
+                visible = !showStartButton,
+                exit = androidx.compose.animation.fadeOut()
+            ) {
+                // Shimmer progress bar
+                LinearProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(2.dp),
+                    color = PrimaryContainer,
+                    trackColor = SurfaceContainerHigh
+                )
+            }
+
+            AnimatedVisibility(
+                visible = showStartButton,
+                enter = fadeIn() + slideInVertically { it / 2 }
+            ) {
+                Button(
+                    onClick = {
+                        navController.navigate("login") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    },
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryContainer)
+                ) {
+                    Text(
+                        "Get Started",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                }
+            }
         }
     }
 }

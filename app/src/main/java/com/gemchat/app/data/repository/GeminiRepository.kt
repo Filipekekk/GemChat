@@ -31,13 +31,21 @@ class GeminiRepository {
         HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
     }
 
-    suspend fun sendMessage(text: String): String = withContext(Dispatchers.IO) {
+    suspend fun sendMessage(text: String, imageBase64: String? = null, mimeType: String? = null): String = withContext(Dispatchers.IO) {
         try {
             trustAll()
 
+            val parts = JSONArray().put(JSONObject().put("text", text))
+            if (imageBase64 != null && mimeType != null) {
+                parts.put(JSONObject().put("inline_data", JSONObject().apply {
+                    put("mime_type", mimeType)
+                    put("data", imageBase64)
+                }))
+            }
+
             val userMsg = JSONObject().apply {
                 put("role", "user")
-                put("parts", JSONArray().put(JSONObject().put("text", text)))
+                put("parts", parts)
             }
             history.add(userMsg)
 

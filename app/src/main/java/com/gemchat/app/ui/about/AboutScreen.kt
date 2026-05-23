@@ -13,6 +13,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -112,12 +121,65 @@ fun AboutScreen(navController: NavController) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text("Authors", fontWeight = FontWeight.Bold, color = PrimaryContainer, fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Jezu & Partner", color = OnSurface, fontSize = 14.sp)   // ← zmień na prawdziwe imiona
-                    Text("Index: XXXXXX & YYYYYY", color = OnSurfaceVariant, fontSize = 12.sp) // ← zmień indeksy
+                    Text("Filip Wójcik & Igor Adamowicz", color = OnSurface, fontSize = 14.sp)
+                    Text("Index: 279531 & 279397", color = OnSurfaceVariant, fontSize = 12.sp)
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
+
+            // Stupid video
+            Text("Top secret developer footage", fontWeight = FontWeight.Bold, color = OnSurface, fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            VideoPlayer(videoUrl = "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4")
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+}
+
+@Composable
+fun VideoPlayer(videoUrl: String) {
+    val context = LocalContext.current
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            val mediaItem = MediaItem.Builder()
+                .setUri(videoUrl)
+                .build()
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+            repeatMode = ExoPlayer.REPEAT_MODE_ALL
+            volume = 0.5f
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp) // Zwiększona wysokość
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black)
+            .border(1.dp, PrimaryContainer, RoundedCornerShape(20.dp))
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
+            },
+            update = { view ->
+                view.player = exoPlayer
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }

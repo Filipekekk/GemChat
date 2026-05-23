@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -37,6 +39,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import android.net.Uri
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import java.io.File
+import java.io.FileOutputStream
 // ViewModel
 class ChatViewModel(
     private val repository: ChatRepository,
@@ -53,9 +62,38 @@ class ChatViewModel(
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
 
-    fun sendMessage(text: String, imagePath: String? = null) {
+    private fun saveImageLocally(context: android.content.Context, uri: Uri): String? {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+            val fileName = "img_${System.currentTimeMillis()}.jpg"
+            val file = File(context.filesDir, fileName)
+            FileOutputStream(file).use { outputStream ->
+                inputStream?.copyTo(outputStream)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun sendMessage(text: String, imageUri: Uri? = null, context: android.content.Context? = null) {
         if (conversationId <= 0) return
         viewModelScope.launch {
+            var imagePath: String? = null
+            var imageBase64: String? = null
+            var mimeType: String? = null
+
+            if (imageUri != null && context != null) {
+                mimeType = context.contentResolver.getType(imageUri)
+                context.contentResolver.openInputStream(imageUri)?.use { inputStream ->
+                    val bytes = inputStream.readBytes()
+                    imageBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                }
+                // Zapisujemy kopię lokalną, aby była dostępna po restarcie
+                imagePath = saveImageLocally(context, imageUri)
+            }
+
             // Jeśli to pierwsza wiadomość — zaktualizuj tytuł
             val currentMessages = repository.getMessagesForConversation(conversationId).first()
             if (currentMessages.isEmpty()) {
@@ -64,10 +102,10 @@ class ChatViewModel(
             }
 
             repository.insertMessage(conversationId, text, true, imagePath)
-            repository.updateLastMessage(conversationId, text)
+            repository.updateLastMessage(conversationId, if (imagePath != null) "Sent an image" else text)
 
             _isLoading.value = true
-            val response = geminiRepository.sendMessage(text)
+            val response = geminiRepository.sendMessage(text, imageBase64, mimeType)
             repository.insertMessage(conversationId, response, false)
             repository.updateLastMessage(conversationId, response)
             _isLoading.value = false
@@ -103,8 +141,15 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsState(initial = emptyList())
     val isLoading by viewModel.isLoading.collectAsState()
     var messageText by remember { mutableStateOf("") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -155,12 +200,15 @@ fun ChatScreen(
                 value = messageText,
                 onValueChange = { messageText = it },
                 onSend = {
-                    if (messageText.isNotBlank()) {
-                        viewModel.sendMessage(messageText)
+                    if (messageText.isNotBlank() || selectedImageUri != null) {
+                        viewModel.sendMessage(messageText, selectedImageUri, context)
                         messageText = ""
+                        selectedImageUri = null
                     }
                 },
-                onImagePick = { }
+                onImagePick = { imagePickerLauncher.launch("image/*") },
+                selectedImageUri = selectedImageUri,
+                onClearImage = { selectedImageUri = null }
             )
         }
     ) { padding ->
@@ -221,7 +269,22 @@ fun ChatBubble(message: Message) {
                     )
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                Text(text = message.text, color = OnSurface, fontSize = 14.sp, lineHeight = 20.sp)
+                Column {
+                    if (message.localImagePath != null) {
+                        AsyncImage(
+                            model = message.localImagePath,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .padding(bottom = 8.dp)
+                        )
+                    }
+                    if (message.text.isNotEmpty()) {
+                        Text(text = message.text, color = OnSurface, fontSize = 14.sp, lineHeight = 20.sp)
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -281,64 +344,104 @@ fun ChatInputBar(
     value: String,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
-    onImagePick: () -> Unit
+    onImagePick: () -> Unit,
+    selectedImageUri: Uri? = null,
+    onClearImage: () -> Unit = {}
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceContainerLowest.copy(alpha = 0.9f))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
-            onClick = onImagePick,
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(SurfaceContainerLow)
-        ) {
-            Icon(Icons.Default.Star, contentDescription = "Wyślij zdjęcie", tint = OnSurfaceVariant)
+        if (selectedImageUri != null) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            ) {
+                AsyncImage(
+                    model = selectedImageUri,
+                    contentDescription = "Selected image",
+                    modifier = Modifier.fillMaxSize()
+                )
+                IconButton(
+                    onClick = onClearImage,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Clear",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
-
-        TextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = {
-                Text("Inquire the intelligence...", color = OnSurfaceVariant.copy(alpha = 0.5f), fontSize = 14.sp)
-            },
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(50.dp))
-                .background(SurfaceContainerLow),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedTextColor = OnSurface,
-                unfocusedTextColor = OnSurface
-            ),
-            singleLine = false,
-            maxLines = 4
-        )
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        IconButton(
-            onClick = onSend,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(PrimaryContainer)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Wyślij",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
+            IconButton(
+                onClick = onImagePick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(SurfaceContainerLow)
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "Wyślij zdjęcie",
+                    tint = OnSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            TextField(
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = {
+                    Text("Inquire the intelligence...", color = OnSurfaceVariant.copy(alpha = 0.5f), fontSize = 14.sp)
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(SurfaceContainerLow),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = OnSurface,
+                    unfocusedTextColor = OnSurface
+                ),
+                singleLine = false,
+                maxLines = 4
             )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = onSend,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(PrimaryContainer)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Wyślij",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
