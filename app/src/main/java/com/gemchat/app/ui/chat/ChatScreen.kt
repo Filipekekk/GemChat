@@ -1,5 +1,13 @@
+/**
+ * ChatScreen.kt to główny ekran interfejsu użytkownika, w którym odbywa się rozmowa z AI.
+ * Zawiera komponenty do wyświetlania bąbelków wiadomości, pasek wprowadzania tekstu oraz logikę wyboru zdjęć.
+ */
 package com.gemchat.app.ui.chat
-import com.gemchat.app.data.repository.GeminiRepository
+
+import android.net.Uri
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -31,22 +39,24 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.gemchat.app.GemChatApplication
 import com.gemchat.app.data.model.Message
 import com.gemchat.app.data.repository.ChatRepository
+import com.gemchat.app.data.repository.GeminiRepository
 import com.gemchat.app.ui.theme.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
-import android.net.Uri
-import android.util.Base64
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
-// ViewModel
+
+// --- VIEWMODEL ---
+
+/**
+ * ChatViewModel zarządza stanem wiadomości i komunikacją z repozytoriami.
+ */
 class ChatViewModel(
     private val repository: ChatRepository,
     private val conversationId: Long
@@ -54,14 +64,20 @@ class ChatViewModel(
 
     private val geminiRepository = GeminiRepository()
 
+    // Strumień wiadomości pobierany z bazy danych
     val messages = if (conversationId > 0)
         repository.getMessagesForConversation(conversationId)
     else
         MutableStateFlow(emptyList<Message>()).asStateFlow()
 
+    // Flaga określająca, czy AI właśnie generuje odpowiedź
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
 
+    /**
+     * Kopiuje wybrane zdjęcie z galerii do folderu prywatnego aplikacji.
+     * Zapobiega to wygaśnięciu uprawnień do pliku po restarcie aplikacji.
+     */
     private fun saveImageLocally(context: android.content.Context, uri: Uri): String? {
         return try {
             val inputStream = context.contentResolver.openInputStream(uri)
@@ -77,6 +93,9 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Główna funkcja wysyłająca wiadomość od użytkownika i pobierająca odpowiedź od AI.
+     */
     fun sendMessage(text: String, imageUri: Uri? = null, context: android.content.Context? = null) {
         if (conversationId <= 0) return
         viewModelScope.launch {
@@ -84,35 +103,44 @@ class ChatViewModel(
             var imageBase64: String? = null
             var mimeType: String? = null
 
+            // Przygotowanie obrazu do wysyłki (Base64) i zapisu (lokalna kopia)
             if (imageUri != null && context != null) {
                 mimeType = context.contentResolver.getType(imageUri)
                 context.contentResolver.openInputStream(imageUri)?.use { inputStream ->
                     val bytes = inputStream.readBytes()
                     imageBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 }
-                // Zapisujemy kopię lokalną, aby była dostępna po restarcie
                 imagePath = saveImageLocally(context, imageUri)
             }
 
-            // Jeśli to pierwsza wiadomość — zaktualizuj tytuł
+            // Jeśli to pierwsza wiadomość w czacie, ustawiamy jego tytuł na treść tej wiadomości
             val currentMessages = repository.getMessagesForConversation(conversationId).first()
             if (currentMessages.isEmpty()) {
                 val title = if (text.length > 30) text.take(30) + "..." else text
                 repository.updateConversationTitle(conversationId, title)
             }
 
+            // Zapisz wiadomość użytkownika w bazie lokalnej
             repository.insertMessage(conversationId, text, true, imagePath)
             repository.updateLastMessage(conversationId, if (imagePath != null) "Sent an image" else text)
 
+            // Pokaż animację ładowania
             _isLoading.value = true
+            
+            // Pobierz odpowiedź z API Gemini
             val response = geminiRepository.sendMessage(text, imageBase64, mimeType)
+            
+            // Zapisz odpowiedź AI w bazie lokalnej
             repository.insertMessage(conversationId, response, false)
             repository.updateLastMessage(conversationId, response)
+            
+            // Ukryj animację ładowania
             _isLoading.value = false
         }
     }
 }
 
+/** Fabryka do tworzenia ViewModela z parametrami (conversationId). */
 class ChatViewModelFactory(
     private val repository: ChatRepository,
     private val conversationId: Long
@@ -123,6 +151,11 @@ class ChatViewModelFactory(
     }
 }
 
+// --- KOMPONENTY UI ---
+
+/**
+ * Główny widok ekranu czatu.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -143,14 +176,15 @@ fun ChatScreen(
     var messageText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
+    // Launcher do otwierania galerii zdjęć
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         selectedImageUri = uri
     }
 
+    // Automatyczne przewijanie listy na dół przy nowej wiadomości
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -163,26 +197,13 @@ fun ChatScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            "GemChat",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = OnSurface
-                        )
-                        Text(
-                            "Gemini 2.0 Flash",
-                            fontSize = 11.sp,
-                            color = OnSurfaceVariant
-                        )
+                        Text("GemChat", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = OnSurface)
+                        Text("Gemini 2.0 Flash", fontSize = 11.sp, color = OnSurfaceVariant)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Wstecz",
-                            tint = OnSurface
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Wstecz", tint = OnSurface)
                     }
                 },
                 actions = {
@@ -190,9 +211,7 @@ fun ChatScreen(
                         Icon(Icons.Default.Menu, contentDescription = "Menu", tint = OnSurface)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = SurfaceContainerLowest.copy(alpha = 0.9f)
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceContainerLowest.copy(alpha = 0.9f))
             )
         },
         bottomBar = {
@@ -214,10 +233,7 @@ fun ChatScreen(
     ) { padding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
@@ -231,6 +247,7 @@ fun ChatScreen(
     }
 }
 
+/** Pojedynczy bąbelek wiadomości na liście. */
 @Composable
 fun ChatBubble(message: Message) {
     Row(
@@ -238,11 +255,9 @@ fun ChatBubble(message: Message) {
         horizontalArrangement = if (message.isFromUser) Arrangement.End else Arrangement.Start
     ) {
         if (!message.isFromUser) {
+            // Awatar AI (Diament)
             Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))),
+                modifier = Modifier.size(32.dp).clip(CircleShape).background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))),
                 contentAlignment = Alignment.Center
             ) { Text("💎", fontSize = 14.sp) }
             Spacer(modifier = Modifier.width(8.dp))
@@ -254,31 +269,17 @@ fun ChatBubble(message: Message) {
         ) {
             Box(
                 modifier = Modifier
-                    .clip(
-                        RoundedCornerShape(
-                            topStart = 24.dp, topEnd = 24.dp,
-                            bottomStart = if (message.isFromUser) 24.dp else 4.dp,
-                            bottomEnd = if (message.isFromUser) 4.dp else 24.dp
-                        )
-                    )
-                    .background(
-                        brush = if (message.isFromUser)
-                            Brush.linearGradient(listOf(SurfaceContainerHigh, SurfaceContainerHigh))
-                        else
-                            Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))
-                    )
+                    .clip(RoundedCornerShape(24.dp, 24.dp, if (message.isFromUser) 24.dp else 4.dp, if (message.isFromUser) 4.dp else 24.dp))
+                    .background(if (message.isFromUser) Brush.linearGradient(listOf(SurfaceContainerHigh, SurfaceContainerHigh)) else Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer)))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Column {
+                    // Wyświetlanie zdjęcia jeśli istnieje w wiadomości
                     if (message.localImagePath != null) {
                         AsyncImage(
                             model = message.localImagePath,
                             contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 200.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .padding(bottom = 8.dp)
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(12.dp)).padding(bottom = 8.dp)
                         )
                     }
                     if (message.text.isNotEmpty()) {
@@ -288,8 +289,7 @@ fun ChatBubble(message: Message) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                    .format(java.util.Date(message.timestamp)),
+                text = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(message.timestamp)),
                 fontSize = 10.sp,
                 color = OnSurfaceVariant.copy(alpha = 0.6f)
             )
@@ -297,48 +297,28 @@ fun ChatBubble(message: Message) {
     }
 }
 
+/** Animacja trzech kropek wyświetlana, gdy AI myśli. */
 @Composable
 fun TypingIndicator() {
     val infiniteTransition = rememberInfiniteTransition(label = "typing")
-    val dot1 by infiniteTransition.animateFloat(
-        0.3f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "d1"
-    )
-    val dot2 by infiniteTransition.animateFloat(
-        0.3f, 1f, infiniteRepeatable(tween(600, delayMillis = 150), RepeatMode.Reverse), label = "d2"
-    )
-    val dot3 by infiniteTransition.animateFloat(
-        0.3f, 1f, infiniteRepeatable(tween(600, delayMillis = 300), RepeatMode.Reverse), label = "d3"
-    )
+    val dot1 by infiniteTransition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "d1")
+    val dot2 by infiniteTransition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(600, delayMillis = 150), RepeatMode.Reverse), label = "d2")
+    val dot3 by infiniteTransition.animateFloat(0.3f, 1f, infiniteRepeatable(tween(600, delayMillis = 300), RepeatMode.Reverse), label = "d3")
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))),
-            contentAlignment = Alignment.Center
-        ) { Text("💎", fontSize = 14.sp) }
+        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Brush.linearGradient(listOf(PrimaryContainer, SecondaryContainer))), contentAlignment = Alignment.Center) { Text("💎", fontSize = 14.sp) }
         Spacer(modifier = Modifier.width(8.dp))
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(24.dp, 24.dp, 24.dp, 4.dp))
-                .background(SurfaceContainer)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
+        Box(modifier = Modifier.clip(RoundedCornerShape(24.dp, 24.dp, 24.dp, 4.dp)).background(SurfaceContainer).padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 listOf(dot1, dot2, dot3).forEach { alpha ->
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(PrimaryContainer.copy(alpha = alpha))
-                    )
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(PrimaryContainer.copy(alpha = alpha)))
                 }
             }
         }
     }
 }
 
+/** Dolny pasek wprowadzania tekstu i wyboru zdjęć. */
 @Composable
 fun ChatInputBar(
     value: String,
@@ -348,99 +328,33 @@ fun ChatInputBar(
     selectedImageUri: Uri? = null,
     onClearImage: () -> Unit = {}
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceContainerLowest.copy(alpha = 0.9f))
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().background(SurfaceContainerLowest.copy(alpha = 0.9f))) {
+        // Podgląd wybranego zdjęcia przed wysłaniem
         if (selectedImageUri != null) {
-            Box(
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                    .size(80.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            ) {
-                AsyncImage(
-                    model = selectedImageUri,
-                    contentDescription = "Selected image",
-                    modifier = Modifier.fillMaxSize()
-                )
-                IconButton(
-                    onClick = onClearImage,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .size(24.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Clear",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+            Box(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).size(80.dp).clip(RoundedCornerShape(8.dp))) {
+                AsyncImage(model = selectedImageUri, contentDescription = "Selected image", modifier = Modifier.fillMaxSize())
+                IconButton(onClick = onClearImage, modifier = Modifier.align(Alignment.TopEnd).size(24.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onImagePick,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceContainerLow)
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Wyślij zdjęcie",
-                    tint = OnSurfaceVariant
-                )
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onImagePick, modifier = Modifier.size(44.dp).clip(CircleShape).background(SurfaceContainerLow)) {
+                Icon(Icons.Default.Add, contentDescription = "Wyślij zdjęcie", tint = OnSurfaceVariant)
             }
-
             Spacer(modifier = Modifier.width(8.dp))
-
             TextField(
                 value = value,
                 onValueChange = onValueChange,
-                placeholder = {
-                    Text("Inquire the intelligence...", color = OnSurfaceVariant.copy(alpha = 0.5f), fontSize = 14.sp)
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(SurfaceContainerLow),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = OnSurface,
-                    unfocusedTextColor = OnSurface
-                ),
-                singleLine = false,
+                placeholder = { Text("Inquire the intelligence...", color = OnSurfaceVariant.copy(alpha = 0.5f), fontSize = 14.sp) },
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(50.dp)).background(SurfaceContainerLow),
+                colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedTextColor = OnSurface, unfocusedTextColor = OnSurface),
                 maxLines = 4
             )
-
             Spacer(modifier = Modifier.width(8.dp))
-
-            IconButton(
-                onClick = onSend,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(PrimaryContainer)
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Wyślij",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+            IconButton(onClick = onSend, modifier = Modifier.size(48.dp).clip(CircleShape).background(PrimaryContainer)) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Wyślij", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
     }

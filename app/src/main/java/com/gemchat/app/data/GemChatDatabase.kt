@@ -1,3 +1,7 @@
+/**
+ * GemChatDatabase.kt definiuje główną konfigurację bazy danych Room.
+ * Określa, jakie encje (tabele) należą do bazy oraz zapewnia dostęp do obiektu DAO.
+ */
 package com.gemchat.app.data
 
 import android.content.Context
@@ -14,12 +18,17 @@ import com.gemchat.app.data.model.Message
     exportSchema = false
 )
 abstract class GemChatDatabase : RoomDatabase() {
+    /** Zapewnia dostęp do metod operujących na danych czatu. */
     abstract fun chatDao(): ChatDao
 
     companion object {
         @Volatile
         private var INSTANCE: GemChatDatabase? = null
 
+        /**
+         * Pobiera instancję bazy danych (Singleton). 
+         * Synchronizacja zapobiega jednoczesnemu tworzeniu wielu instancji bazy.
+         */
         fun getDatabase(context: Context): GemChatDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
