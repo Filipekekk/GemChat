@@ -91,7 +91,7 @@ fun AboutScreen(navController: NavController) {
             // Sekcja z filmikiem wideo
             Text("Top secret developer footage", fontWeight = FontWeight.Bold, color = OnSurface, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(8.dp))
-            VideoPlayer(videoUrl = "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-mp4-file.mp4")
+            VideoPlayer(videoUrl = "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4")
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -101,37 +101,56 @@ fun AboutScreen(navController: NavController) {
 /**
  * Komponent VideoPlayer integrujący systemowy widok AndroidView z odtwarzaczem ExoPlayer (Media3).
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun VideoPlayer(videoUrl: String) {
     val context = LocalContext.current
     
-    // Inicjalizacja ExoPlayera
+    // Inicjalizacja ExoPlayera z obsługą błędów
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             val mediaItem = MediaItem.Builder().setUri(videoUrl).build()
             setMediaItem(mediaItem)
             prepare()
-            playWhenReady = true // Autoodtwarzanie
-            repeatMode = ExoPlayer.REPEAT_MODE_ALL // Pętla
-            volume = 0.5f
+            playWhenReady = true
+            repeatMode = ExoPlayer.REPEAT_MODE_ALL
+            volume = 1.0f // Maksymalna głośność dla pewności
+            
+            // Dodajemy słuchacza błędów, aby widzieć w logach co się dzieje
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    android.util.Log.e("VideoPlayer", "Błąd odtwarzania: ${error.message}", error)
+                }
+            })
         }
     }
 
-    // Zwolnienie zasobów odtwarzacza po wyjściu z ekranu (ważne dla pamięci!)
+    // Zwolnienie zasobów odtwarzacza po wyjściu z ekranu
     DisposableEffect(exoPlayer) {
         onDispose { exoPlayer.release() }
     }
 
-    Box(modifier = Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black).border(1.dp, PrimaryContainer, RoundedCornerShape(20.dp))) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black)
+            .border(1.dp, PrimaryContainer, RoundedCornerShape(20.dp))
+    ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = true // Pokaż paski sterowania
+                    useController = true
+                    // Ustawiamy skalowanie, aby wypełnić ramkę
+                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     setBackgroundColor(android.graphics.Color.BLACK)
                 }
             },
-            update = { view -> view.player = exoPlayer },
+            update = { view -> 
+                view.player = exoPlayer 
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
