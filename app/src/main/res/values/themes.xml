@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Themes.xml - Konfiguracja motywu systemowego aplikacji na poziomie Androida -->
 <resources>
-
+    <!--
+        Ustawiamy bazowy motyw na NoActionBar, ponieważ cały interfejs (w tym TopBar)
+        budujemy ręcznie w Jetpack Compose.
+    -->
     <style name="Theme.GemChat" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

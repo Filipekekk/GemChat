@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    network_security_config.xml - Plik konfiguracji bezpieczeństwa połączeń sieciowych.
+    Umożliwia dostosowanie ustawień zaufania dla certyfikatów i typów ruchu.
+-->
 <network-security-config>
+    <!--
+        cleartextTrafficPermitted="true" - Pozwala na korzystanie z niezabezpieczonego protokołu HTTP.
+        Jest to niezbędne do odtwarzania wideo z niektórych zewnętrznych serwerów testowych w sekcji About.
+    -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
