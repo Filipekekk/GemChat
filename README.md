@@ -59,6 +59,8 @@ Aby aplikacja mogła łączyć się z modelem, wymaga własnego klucza API.
 ## ✨ Efekt końcowy (Zrzuty ekranu)
 
 <div style="display: flex; gap: 10px;">
-  <img width="270" height="585" alt="Chat Screen" src="LINK_DO_SCREENA_CZATU" />
-  <img width="270" height="585" alt="Conversations List" src="LINK_DO_SCREENA_LISTY" />
-  <img width="270" height="585" alt="Settings Screen" src="LINK_DO_SCREENA_USTAWIEN" />
+  <img width="270" height="585" alt="Chat Screen" src="screenshots/chat.png" />
+  <img width="270" height="585" alt="Conversations List" src="screenshots/list.png" />
+  <img width="270" height="585" alt="Settings Screen" src="screenshots/settings.png" />
+  <img width="270" height="585" alt="Settings Screen" src="screenshots/starting.png" />
+  <img width="270" height="585" alt="Settings Screen" src="screenshots/about.png" />
