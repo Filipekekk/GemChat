@@ -53,8 +53,8 @@ Aby aplikacja mogła łączyć się z modelem, wymaga własnego klucza API.
 
 ## 📱 Projekt Ekranów (Mockups)
 
-![Mockups1](Mockups1.png)
-![Mockups2](Mockups2.png)
+<div style="display: flex; gap: 10px;">
+  <img width="768" height="465" alt="Chat Screen" src="screenshots/mockup.png" />
 
 ## ✨ Efekt końcowy (Zrzuty ekranu)
 
