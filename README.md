@@ -90,7 +90,7 @@ Aby aplikacja mogła łączyć się z modelem, wymaga własnego klucza API.
 
 ## Navigation
 <div style="display: flex; gap: 10px;">
-  <img width="702" height="559" alt="Chat Screen" src="screenshots/mockup.png" />
+  <img width="702" height="559" alt="Chat Screen" src="screenshots/navi.png" />
 </div>
 
 ## ✨ Efekt końcowy (Zrzuty ekranu)
